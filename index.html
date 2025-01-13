@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spotify Track Stats - Home</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="homepage">
+  <div class="main-container">
+    <h1 class="page-title">Spotify Track Tracker</h1>
+
+    <!-- ADD A NEW TRACK -->
+    <div class="card add-track-section">
+      <form method="POST" action="/">
+        <label for="track_url">Add a New Track</label>
+        <div class="add-track-inputs">
+          <input
+            type="text"
+            id="track_url"
+            name="track_url"
+            placeholder="https://open.spotify.com/track/..."
+            required
+          />
+          <button type="submit">Add Track</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- STATS + CHART -->
+    <div class="stats-chart-row">
+      <!-- STAT CARD: TOTAL URLs TRACKED -->
+      <div class="card stat-card">
+        <h2>+<br />Total URLs Tracked</h2>
+        <div class="stat-value" id="totalUrls">
+          {{ stats.total_urls if stats else 0 }}
+        </div>
+      </div>
+
+      <!-- STAT CARD: TOTAL STREAM COUNT -->
+      <div class="card stat-card">
+        <h2>✔<br />Total Stream Count</h2>
+        <div class="stat-value" id="totalStreams">
+          {{ stats.total_streams if stats else 0 }}
+        </div>
+      </div>
+
+      <!-- STAT CARD: UNIQUE ARTISTS -->
+      <div class="card stat-card">
+        <h2>⦿<br />Unique Artists</h2>
+        <div class="stat-value" id="uniqueArtists">
+          {{ stats.unique_artists if stats else 0 }}
+        </div>
+      </div>
+
+      <!-- CHART CARD -->
+      <div class="card chart-card">
+        <h2>Daily Stream Differences</h2>
+
+        <!-- FILTERS -->
+        <div style="margin-bottom: 10px;">
+          <label for="songSelect">Song:</label>
+          <select id="songSelect">
+            <option value="">All Songs</option>
+            {% for song in tracks %}
+              <option value="{{ song.track_id }}">{{ song.title }} ({{ song.track_id }})</option>
+            {% endfor %}
+          </select>
+
+          <label for="daysSelect">Days:</label>
+          <select id="daysSelect">
+            <option value="">All</option>
+            <option value="7">Last 7 Days</option>
+            <option value="14">Last 14 Days</option>
+            <option value="31">Last 31 Days</option>
+          </select>
+
+          <button id="updateChartBtn">Update Chart</button>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="growthChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRACKED TRACKS -->
+    <div class="card tracked-tracks">
+      <div class="tracked-header">
+        <h2>Tracked Tracks</h2>
+        <div class="filter-container">
+          <select>
+            <option>Last Day</option>
+            <option>Last 7 Days</option>
+            <option>Last 30 Days</option>
+          </select>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ARTIST</th>
+            <th>TITLE</th>
+            <th>ID</th>
+            <th>DATE</th>
+            <th>STREAM COUNT</th>
+            <th>DIFFERENCE</th>
+            <th>STATUS</th>
+            <th>ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for song in tracks %}
+          <tr>
+            <td>{{ song.artist }}</td>
+            <td>{{ song.title }}</td>
+            <td>{{ song.track_id }}</td>
+            <td>{{ song.date }}</td>
+            <td>{{ song.stream_count }}</td>
+            <td>{{ song.difference }}</td>
+            <td>
+              {% if song.status == 'resume' %}
+              <span class="status-badge status-resume">Resume</span>
+              {% else %}
+              <span class="status-badge status-pause">Pause</span>
+              {% endif %}
+            </td>
+            <td class="actions">
+              {% if song.status == 'resume' %}
+                <a href="{{ url_for('pause', track_id=song.track_id) }}" class="btn-pause">Pause</a>
+              {% else %}
+                <a href="{{ url_for('resume', track_id=song.track_id) }}" class="btn-resume">Resume</a>
+              {% endif %}
+              <a href="{{ url_for('delete', track_id=song.track_id) }}" class="btn-delete">Delete</a>
+              <a href="{{ url_for('detail_by_id', track_id=song.track_id) }}" class="btn-view">View</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let growthChart; // We'll store the Chart.js instance here.
+
+    // Function to load chart data via AJAX from /chart_data endpoint
+    async function loadChartData(songId = "", days = "") {
+      const params = new URLSearchParams();
+      if (songId) {
+        params.append("song_id", songId);
+      }
+      if (days) {
+        params.append("days", days);
+      }
+      const url = "/chart_data?" + params.toString();
+      const response = await fetch(url);
+      const data = await response.json();
+      return data;
+    }
+
+    // Function to render (or update) the chart
+    async function updateChart() {
+      const songId = document.getElementById("songSelect").value;
+      const days = document.getElementById("daysSelect").value;
+      const chartData = await loadChartData(songId, days);
+
+      // If chart already exists, destroy it first
+      if (growthChart) {
+        growthChart.destroy();
+      }
+      
+      const ctx = document.getElementById("growthChart").getContext("2d");
+      const config = {
+        type: 'line',
+        data: {
+          labels: chartData.labels,
+          datasets: [{
+            label: 'Daily Difference',
+            data: chartData.values,
+            borderColor: '#1DB954',
+            backgroundColor: 'rgba(29,185,84,0.2)',
+            tension: 0.2,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              ticks: { color: '#ffffff' },
+              grid: { color: '#333' }
+            },
+            y: {
+              ticks: { color: '#ffffff' },
+              grid: { color: '#333' }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: {
+                color: '#ffffff'
+              }
+            }
+          }
+        }
+      };
+      growthChart = new Chart(ctx, config);
+    }
+
+    // On page load, render the chart with default (all songs, all days)
+    window.addEventListener('DOMContentLoaded', () => {
+      updateChart();
+      document.getElementById("updateChartBtn").addEventListener("click", () => {
+        updateChart();
+      });
+    });
+  </script>
+</body>
+</html>
